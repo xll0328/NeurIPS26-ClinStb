@@ -89,7 +89,7 @@ The base data and training framework builds on the public [Medformer repository]
 ```bibtex
 @inproceedings{clinstab2026,
   title={ClinStab: Stability-Oriented Learning for Medical Time Series via Dual-Stream Alignment},
-  author={Lai, Songning and Xu, Haoxuan and Liu, Yi and Chen, Wenshuo and Feng, Ninghui and Yang, Jiayu and Li, Haoang and Yue, Yutao},
+  author={Chen, Wenshuo and Xu, Haoxuan and Liu, Yi and Lai, Songning and Feng, Ninghui and Yang, Jiayu and Li, Haoang and Yue, Yutao},
   booktitle={Advances in Neural Information Processing Systems},
   year={2026}
 }
