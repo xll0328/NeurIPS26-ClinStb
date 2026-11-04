@@ -1,6 +1,6 @@
 # ClinStab
 
-ClinStab is a Medformer-based medical time-series classifier with the Salience-Context Dual Modulation (SCDM) block and stability-oriented training. The implementation in `models/ClinStab.py` follows the paper specification: multi-granularity channel-aligned patching, energy-based hard TopK routing, attention for the selected channels, depth-wise temporal convolution for the residual channels, channel-order-preserving fusion, and residual classification.
+ClinStab is a Medformer-based medical time-series classifier with the Salience-Context Dual Modulation (SCDM) block and stability-oriented training. The release provides a compact reference implementation of the paper's model and objective utilities: multi-granularity channel-aligned patching, energy-based hard TopK routing, attention for the selected channels, depth-wise temporal convolution for the residual channels, channel-order-preserving fusion, and residual classification.
 
 ## Setup
 

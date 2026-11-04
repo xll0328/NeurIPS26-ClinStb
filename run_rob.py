@@ -81,9 +81,9 @@ if __name__ == "__main__":
     )
 
     parser.add_argument('--stddev', type=float, default=2, help='噪声扰动幅度')
-    parser.add_argument('--eps', type=float, default=0.1, help='PGD攻击幅度')
+    parser.add_argument('--eps', type=float, default=0.20, help='PGD攻击幅度')
     parser.add_argument('--alpha', type=float, default=0.01, help='PGD攻击步长')
-    parser.add_argument('--steps', type=int, default=20, help='PGD攻击次数')
+    parser.add_argument('--steps', type=int, default=10, help='PGD攻击次数')
     parser.add_argument('--w_adv', type=float, default=1, help='PGD前后输出接近')
     parser.add_argument('--w_cls', type=float, default=0.5, help='teacher的输出和原本的输出距离接近')
     parser.add_argument('--w_sim', type=float, default=0.5, help='IB输出特征间的loss')
@@ -221,9 +221,9 @@ if __name__ == "__main__":
     # parser.add_argument('--loss', type=str, default='MSE', help='loss function')
     # parser.add_argument('--lradj', type=str, default='type1', help='adjust learning rate')
     # parser.add_argument('--use_amp', action='store_true', help='use automatic mixed precision training', default=False)
-    parser.add_argument('--rho', type=float, default=0.75,
+    parser.add_argument('--rho', type=float, default=0.65,
                     help='AutoPGD步长调整参数，控制步长增减比例')
-    parser.add_argument('--max_restarts', type=int, default=2,
+    parser.add_argument('--max_restarts', type=int, default=1,
                     help='AutoPGD最大重启次数，当攻击停滞时重新初始化')
 
     # GPU

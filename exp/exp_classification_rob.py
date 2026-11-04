@@ -72,7 +72,7 @@ class AutoPGD(nn.Module):
         torch.cuda.empty_cache()
 
         # 启用混合精度计算
-        with torch.cuda.amp.autocast(enabled=True):
+        with torch.cuda.amp.autocast(enabled=torch.cuda.is_available()):
             # 分批次处理
             for start_idx in range(0, batch_size, sub_batch_size):
                 end_idx = min(start_idx + sub_batch_size, batch_size)
@@ -129,10 +129,10 @@ class AutoPGD(nn.Module):
                             cost = custom_loss_fn(outputs, sub_model_orig_outputs, sub_labels)
                         elif sub_model_orig_outputs is not None:
                             # 使用输出一致性损失
-                            cost = -nn.MSELoss(reduction='sum')(outputs, sub_model_orig_outputs) / outputs.size(0)
+                            cost = nn.MSELoss(reduction='sum')(outputs, sub_model_orig_outputs) / outputs.size(0)
                         else:
                             # 使用标准分类损失
-                            cost = -nn.CrossEntropyLoss()(outputs, sub_labels.long())
+                            cost = nn.CrossEntropyLoss()(outputs, sub_labels.long())
 
                         # 更新最佳结果
                         with torch.no_grad():
@@ -918,13 +918,13 @@ class Exp_Classification_Rob(Exp_Basic):
                 outputs_orig: 原始数据的模型输出
                 labels: 真实标签
             返回:
-                组合损失值 - 对于攻击，我们希望返回一个正值(越大越好)
+                组合损失值；AutoPGD 对该值执行梯度上升，因此越大越具攻击性
             """
-            # 1. 分类损失 - 希望预测错误，所以是负的交叉熵
-            loss_cls = -nn.CrossEntropyLoss()(outputs_adv, labels.long())
+            # 1. 分类损失；攻击通过最大化交叉熵来推动错误预测
+            loss_cls = nn.CrossEntropyLoss()(outputs_adv, labels.long())
 
             # 2. 一致性损失 - 希望输出差异最大
-            loss_adv = -nn.MSELoss()(nn.Softmax(dim=1)(outputs_adv),
+            loss_adv = nn.MSELoss()(nn.Softmax(dim=1)(outputs_adv),
                                     nn.Softmax(dim=1)(outputs_orig)) * 10 * self.args.w_adv
 
             # 对于攻击，我们返回一个需要被最大化的值
@@ -986,6 +986,7 @@ class Exp_Classification_Rob(Exp_Basic):
             # 第一步：为当前epoch生成一次扰动数据（所有batch）
             print(f"Epoch {epoch+1}/{training_epochs}: 生成扰动数据...")
             all_perturbed_data = []
+            all_original_data = []
             all_orig_outputs = []
             all_labels = []
             all_padding_masks = []
@@ -1010,6 +1011,7 @@ class Exp_Classification_Rob(Exp_Basic):
 
                 # 保存扰动数据和原始输出供多次训练使用
                 all_perturbed_data.append(perturbed_batch_x.clone())
+                all_original_data.append(batch_x.clone())
                 all_orig_outputs.append(outputs_orig.clone())
                 all_labels.append(label.clone())
                 all_padding_masks.append(padding_mask.clone())
@@ -1036,16 +1038,10 @@ class Exp_Classification_Rob(Exp_Basic):
 
                     # 获取数据
                     perturbed_batch_x = all_perturbed_data[i]
+                    batch_x = all_original_data[i]
                     outputs_orig = all_orig_outputs[i]
                     label = all_labels[i]
                     padding_mask = all_padding_masks[i]
-
-                    batch_x = batch_x.float().to(self.device) if 'batch_x' in locals() else None
-                    if batch_x is None or batch_x.size(0) != perturbed_batch_x.size(0):
-                        # 获取对应的原始数据
-                        # 这里假设我们存储了对应的原始数据，如果没有则需要从数据加载器中重新获取
-                        with torch.no_grad():
-                            batch_x = perturbed_batch_x.clone() - (perturbed_batch_x.clone() - perturbed_batch_x.clone()).detach()
 
                     outputs_orig_current = self.model(batch_x, padding_mask, None, None)
                     # 前向传播 - 使用扰动数据
@@ -1062,13 +1058,13 @@ class Exp_Classification_Rob(Exp_Basic):
 
                     # 2. 扰动数据学生模型的输出和原始数据学生模型的输出对比 - 一致性损失
                     loss_adv = nn.MSELoss()(nn.Softmax(dim=1)(outputs_adv),
-                                            nn.Softmax(dim=1)(outputs_orig)) * 10 * self.args.w_adv
+                                            nn.Softmax(dim=1)(outputs_orig_current)) * 10 * self.args.w_adv
                     iter_loss_adv.append(loss_adv.item())
 
                     # 3. 如果有teacher模型，原始数据学生模型的输出和教师模型的输出对比 - 知识蒸馏损失
                     if teacher_model is not None:
                         with torch.no_grad():
-                            outputs_teacher = teacher_model(all_perturbed_data[i], padding_mask, None, None)
+                            outputs_teacher = teacher_model(batch_x, padding_mask, None, None)
 
                         loss_distill = nn.KLDivLoss(reduction='batchmean')(
                             nn.LogSoftmax(dim=1)(outputs_adv),
