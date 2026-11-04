@@ -78,7 +78,7 @@ python -m unittest discover -s tests -v
 - `data_provider/`: loaders for the processed benchmark layout.
 - `tests/`: model, routing, gradient, and stability-objective smoke tests.
 
-No raw data, checkpoints, experiment logs, or internal sweep scripts are bundled.
+The release provides the runnable model, objective utilities, training entry points, and lightweight verification tests. Dataset files are obtained separately from the providers listed below.
 
 ## Upstream implementation
 
