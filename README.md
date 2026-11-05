@@ -4,8 +4,8 @@
 
 ### Stability-Oriented Learning for Medical Time Series via Dual-Stream Alignment
 
-<strong>Wenshuo Chen<sup>†</sup>, Haoxuan Xu<sup>†</sup>, Yi Liu, Songning Lai, Ninghui Feng, Jiayu Yang, Haoang Li, Yutao Yue<sup>*</sup></strong><br />
-<sup>†</sup>Equal contribution · <sup>*</sup>Corresponding author
+<strong>Wenshuo Chen<sup>†</sup>, Haoxuan Xu<sup>†</sup>, Yi Liu, Songning Lai, Ninghui Feng, Jiayu Yang, Haoang Li<sup>*</sup>, Yutao Yue<sup>*</sup></strong><br />
+<sup>†</sup>Equal contribution · <sup>*</sup>Corresponding authors
 
 [![NeurIPS 2026](https://img.shields.io/badge/NeurIPS-2026-7b2cbf.svg)](https://neurips.cc/Conferences/2026)
 [![Python](https://img.shields.io/badge/Python-3.10-3776AB.svg?logo=python&logoColor=white)](https://www.python.org/)
@@ -177,6 +177,7 @@ loss, terms = stability_objective(
 ## Citation
 
 Wenshuo Chen and Haoxuan Xu contributed equally to this work.
+Haoang Li and Yutao Yue are corresponding authors.
 
 ```bibtex
 @inproceedings{clinstab2026,
