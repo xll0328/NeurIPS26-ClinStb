@@ -1,15 +1,20 @@
 import argparse
 import os
 
+def parse_bool(value):
+    if isinstance(value, bool):
+        return value
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "y", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "n", "off"}:
+        return False
+    raise argparse.ArgumentTypeError("expected a boolean value")
+
 if __name__ == "__main__":
-    """fix_seed = 42
-    random.seed(fix_seed)
-    torch.manual_seed(fix_seed)
-    np.random.seed(fix_seed)"""
 
     parser = argparse.ArgumentParser(description="ClinStab training and evaluation")
 
-    # basic config
     parser.add_argument(
         "--task_name",
         type=str,
@@ -31,7 +36,6 @@ if __name__ == "__main__":
         help="model name, options: [Autoformer, Crossformer, FEDformer, Informer, iTransformer, MTST, Nonstationary_Transformer, PatchTST, Reformer, Transformer, TCN, Medformer, ClinStab]",
     )
 
-    # data loader
     parser.add_argument(
         "--data", type=str, required=True, default="ETTm1", help="dataset type"
     )
@@ -57,9 +61,7 @@ if __name__ == "__main__":
         default="h",
         help="freq for time features encoding, options:[s:secondly, t:minutely, h:hourly, d:daily, b:business days, w:weekly, m:monthly], you can also use more detailed freq like 15min or 3h",
     )
-    # parser.add_argument('--checkpoints', type=str, default='./checkpoints/', help='location of model checkpoints')
 
-    # forecasting task
     parser.add_argument("--seq_len", type=int, default=96, help="input sequence length")
     parser.add_argument("--label_len", type=int, default=48, help="start token length")
     parser.add_argument(
@@ -72,15 +74,12 @@ if __name__ == "__main__":
         "--inverse", action="store_true", help="inverse output data", default=False
     )
 
-    # inputation task
     parser.add_argument("--mask_rate", type=float, default=0.25, help="mask ratio")
 
-    # anomaly detection task
     parser.add_argument(
         "--anomaly_ratio", type=float, default=0.25, help="prior anomaly ratio (percent)"
     )
 
-    # model define for baselines
     parser.add_argument('--expand', type=int, default=2, help='expansion factor for Mamba')
     parser.add_argument('--d_conv', type=int, default=4, help='conv kernel size for Mamba')
     parser.add_argument("--top_k", type=int, default=5, help="for TimesBlock")
@@ -156,11 +155,9 @@ if __name__ == "__main__":
         "--scdm_alpha",
         type=float,
         default=4.67,
-        help="SCDM sparsity ratio; k=floor(channels/scdm_alpha)",
+        help="SCDM sparsity ratio; k=max(1, floor(channels/scdm_alpha))",
     )
 
-    # optimization
-    # parser.add_argument('--num_workers', type=int, default=10, help='data loader num workers')
     parser.add_argument(
         "--num_workers", type=int, default=0, help="data loader num workers"
     )
@@ -175,6 +172,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--learning_rate", type=float, default=0.0001, help="optimizer learning rate"
     )
+    parser.add_argument("--weight_decay", type=float, default=1e-5)
     parser.add_argument("--des", type=str, default="test", help="exp description")
     parser.add_argument("--loss", type=str, default="MSE", help="loss function")
     parser.add_argument(
@@ -193,8 +191,7 @@ if __name__ == "__main__":
         default=False,
     )
 
-    # GPU
-    parser.add_argument("--use_gpu", type=bool, default=True, help="use gpu")
+    parser.add_argument("--use_gpu", type=parse_bool, default=True, help="use gpu")
     parser.add_argument("--gpu", type=int, default=0, help="gpu")
     parser.add_argument(
         "--use_multi_gpu", action="store_true", help="use multiple gpus", default=False
@@ -202,9 +199,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--devices", type=str, default="0,1,2,3", help="device ids of multiple gpus"
     )
-    # parser.add_argument('--devices', type=str, default='0,1', help='device ids of multiple gpus')
 
-    # de-stationary projector params
     parser.add_argument(
         "--p_hidden_dims",
         type=int,
@@ -220,8 +215,8 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
+    from utils.tools import experiment_setting
 
-    # Delay optional scientific imports until after argparse handles --help.
     import torch
     import random
     import numpy as np
@@ -263,37 +258,15 @@ if __name__ == "__main__":
             torch.manual_seed(seed)
             torch.cuda.manual_seed(seed)
             torch.cuda.manual_seed_all(seed)
-            # comment out the following lines if you are using dilated convolutions, e.g., TCN
-            # otherwise it will slow down the training extremely
+
             if args.model != "TCN":
                 torch.backends.cudnn.benchmark = False
                 torch.backends.cudnn.deterministic = True
 
-
-            # setting record of experiments
             args.seed = seed
-            setting = "{}_{}_{}_{}_ft{}_sl{}_ll{}_pl{}_dm{}_nh{}_el{}_dl{}_df{}_fc{}_eb{}_dt{}_{}_seed{}".format(
-                args.task_name,
-                args.model_id,
-                args.model,
-                args.data,
-                args.features,
-                args.seq_len,
-                args.label_len,
-                args.pred_len,
-                args.d_model,
-                args.n_heads,
-                args.e_layers,
-                args.d_layers,
-                args.d_ff,
-                args.factor,
-                args.embed,
-                args.distil,
-                args.des,
-                args.seed,
-            )
+            setting = experiment_setting(args)
 
-            exp = Exp(args)  # set experiments
+            exp = Exp(args)
             print(
                 ">>>>>>>start training : {}>>>>>>>>>>>>>>>>>>>>>>>>>>".format(setting)
             )
@@ -313,35 +286,15 @@ if __name__ == "__main__":
             torch.manual_seed(seed)
             torch.cuda.manual_seed(seed)
             torch.cuda.manual_seed_all(seed)
-            # comment out the following lines if you are using dilated convolutions, e.g., TCN
-            # otherwise it will slow down the training extremely
+
             if args.model != "TCN":
                 torch.backends.cudnn.benchmark = False
                 torch.backends.cudnn.deterministic = True
 
             args.seed = seed
-            setting = "{}_{}_{}_{}_ft{}_sl{}_ll{}_pl{}_dm{}_nh{}_el{}_dl{}_df{}_fc{}_eb{}_dt{}_{}_seed{}".format(
-                args.task_name,
-                args.model_id,
-                args.model,
-                args.data,
-                args.features,
-                args.seq_len,
-                args.label_len,
-                args.pred_len,
-                args.d_model,
-                args.n_heads,
-                args.e_layers,
-                args.d_layers,
-                args.d_ff,
-                args.factor,
-                args.embed,
-                args.distil,
-                args.des,
-                args.seed,
-            )
+            setting = experiment_setting(args)
 
-            exp = Exp(args)  # set experiments
+            exp = Exp(args)
             print(
                 ">>>>>>>testing : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<".format(setting)
             )

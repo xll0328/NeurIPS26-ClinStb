@@ -19,7 +19,6 @@ from sklearn.metrics import average_precision_score
 
 warnings.filterwarnings("ignore")
 
-
 class Exp_Classification(Exp_Basic):
     def __init__(self, args):
         super().__init__(args)
@@ -28,19 +27,17 @@ class Exp_Classification(Exp_Basic):
         self.swa = args.swa
 
     def _build_model(self):
-        # model input depends on data
-        # train_data, train_loader = self._get_data(flag='TRAIN')
-        test_data, test_loader = self._get_data(flag="TEST")
-        self.args.seq_len = test_data.max_seq_len  # redefine seq_len
+
+        train_data, _ = self._get_data(flag="TRAIN")
+        self.args.seq_len = train_data.max_seq_len
         self.args.pred_len = 0
-        # self.args.enc_in = train_data.feature_df.shape[1]
-        # self.args.num_class = len(train_data.class_names)
-        self.args.enc_in = test_data.X.shape[2]  # redefine enc_in
-        self.args.num_class = len(np.unique(test_data.y))
-        # model init
+
+        self.args.enc_in = train_data.X.shape[2]
+        self.args.num_class = len(np.unique(train_data.y))
+
         model = (
             self.model_dict[self.args.model].Model(self.args).float()
-        )  # pass args to model
+        )
         if self.args.use_multi_gpu and self.args.use_gpu:
             model = nn.DataParallel(model, device_ids=self.args.device_ids)
         return model
@@ -51,7 +48,11 @@ class Exp_Classification(Exp_Basic):
         return data_set, data_loader
 
     def _select_optimizer(self):
-        model_optim = optim.Adam(self.model.parameters(), lr=self.args.learning_rate)
+        model_optim = optim.AdamW(
+            self.model.parameters(),
+            lr=self.args.learning_rate,
+            weight_decay=getattr(self.args, "weight_decay", 1e-5),
+        )
         return model_optim
 
     def _select_criterion(self):
@@ -88,9 +89,7 @@ class Exp_Classification(Exp_Basic):
 
         preds = torch.cat(preds, 0)
         trues = torch.cat(trues, 0)
-        probs = torch.nn.functional.softmax(
-            preds
-        )  # (total_samples, num_classes) est. prob. for each class and sample
+        probs = torch.nn.functional.softmax(preds, dim=1)
         trues_onehot = (
             torch.nn.functional.one_hot(
                 trues.reshape(
@@ -102,20 +101,26 @@ class Exp_Classification(Exp_Basic):
             .cpu()
             .numpy()
         )
-        # print(trues_onehot.shape)
+
         predictions = (
             torch.argmax(probs, dim=1).cpu().numpy()
-        )  # (total_samples,) int class index for each sample
+        )
         probs = probs.cpu().numpy()
         trues = trues.flatten().cpu().numpy()
-        # accuracy = cal_accuracy(predictions, trues)
+
+        try:
+            auroc = roc_auc_score(trues_onehot, probs, multi_class="ovr")
+            auprc = average_precision_score(trues_onehot, probs, average="macro")
+        except ValueError:
+            auroc = float("nan")
+            auprc = float("nan")
         metrics_dict = {
             "Accuracy": accuracy_score(trues, predictions),
-            "Precision": precision_score(trues, predictions, average="macro"),
-            "Recall": recall_score(trues, predictions, average="macro"),
-            "F1": f1_score(trues, predictions, average="macro"),
-            "AUROC": roc_auc_score(trues_onehot, probs, multi_class="ovr"),
-            "AUPRC": average_precision_score(trues_onehot, probs, average="macro"),
+            "Precision": precision_score(trues, predictions, average="macro", zero_division=0),
+            "Recall": recall_score(trues, predictions, average="macro", zero_division=0),
+            "F1": f1_score(trues, predictions, average="macro", zero_division=0),
+            "AUROC": auroc,
+            "AUPRC": auprc,
         }
 
         if self.swa:
@@ -127,13 +132,10 @@ class Exp_Classification(Exp_Basic):
     def train(self, setting):
         train_data, train_loader = self._get_data(flag="TRAIN")
         vali_data, vali_loader = self._get_data(flag="VAL")
-        test_data, test_loader = self._get_data(flag="TEST")
         print(train_data.X.shape)
         print(train_data.y.shape)
         print(vali_data.X.shape)
         print(vali_data.y.shape)
-        print(test_data.X.shape)
-        print(test_data.y.shape)
 
         path = (
             "./checkpoints/"
@@ -151,6 +153,9 @@ class Exp_Classification(Exp_Basic):
         )
 
         model_optim = self._select_optimizer()
+        scheduler = optim.lr_scheduler.CosineAnnealingLR(
+            model_optim, T_max=max(1, self.args.train_epochs)
+        )
         criterion = self._select_criterion()
 
         for epoch in range(self.args.train_epochs):
@@ -199,8 +204,6 @@ class Exp_Classification(Exp_Basic):
             print("Epoch: {} cost time: {}".format(epoch + 1, time.time() - epoch_time))
             train_loss = np.average(train_loss)
             vali_loss, val_metrics_dict = self.vali(vali_data, vali_loader, criterion)
-            test_loss, test_metrics_dict = self.vali(test_data, test_loader, criterion)
-
             print(
                 f"Epoch: {epoch + 1}, Steps: {train_steps}, | Train Loss: {train_loss:.5f}\n"
                 f"Validation results --- Loss: {vali_loss:.5f}, "
@@ -210,19 +213,13 @@ class Exp_Classification(Exp_Basic):
                 f"F1: {val_metrics_dict['F1']:.5f}, "
                 f"AUROC: {val_metrics_dict['AUROC']:.5f}, "
                 f"AUPRC: {val_metrics_dict['AUPRC']:.5f}\n"
-                f"Test results --- Loss: {test_loss:.5f}, "
-                f"Accuracy: {test_metrics_dict['Accuracy']:.5f}, "
-                f"Precision: {test_metrics_dict['Precision']:.5f}, "
-                f"Recall: {test_metrics_dict['Recall']:.5f} "
-                f"F1: {test_metrics_dict['F1']:.5f}, "
-                f"AUROC: {test_metrics_dict['AUROC']:.5f}, "
-                f"AUPRC: {test_metrics_dict['AUPRC']:.5f}\n"
             )
             early_stopping(
                 -val_metrics_dict["F1"],
                 self.swa_model if self.swa else self.model,
                 path,
             )
+            scheduler.step()
             if early_stopping.early_stop:
                 print("Early stopping")
                 break
@@ -231,9 +228,9 @@ class Exp_Classification(Exp_Basic):
 
         best_model_path = path + "checkpoint.pth"
         if self.swa:
-            self.swa_model.load_state_dict(torch.load(best_model_path))
+            self.swa_model.load_state_dict(torch.load(best_model_path, map_location=self.device))
         else:
-            self.model.load_state_dict(torch.load(best_model_path))
+            self.model.load_state_dict(torch.load(best_model_path, map_location=self.device))
 
         return self.model
 
@@ -251,15 +248,14 @@ class Exp_Classification(Exp_Basic):
             if not os.path.exists(model_path):
                 raise Exception("No model found at %s" % model_path)
             if self.swa:
-                self.swa_model.load_state_dict(torch.load(model_path))
+                self.swa_model.load_state_dict(torch.load(model_path, map_location=self.device))
             else:
-                self.model.load_state_dict(torch.load(model_path))
+                self.model.load_state_dict(torch.load(model_path, map_location=self.device))
 
         criterion = self._select_criterion()
         vali_loss, val_metrics_dict = self.vali(vali_data, vali_loader, criterion)
         test_loss, test_metrics_dict = self.vali(test_data, test_loader, criterion)
 
-        # result save
         folder_path = (
             "./results/"
             + self.args.task_name

@@ -1,15 +1,21 @@
 import argparse
+import copy
 import os
 
+def parse_bool(value):
+    if isinstance(value, bool):
+        return value
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "y", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "n", "off"}:
+        return False
+    raise argparse.ArgumentTypeError("expected a boolean value")
+
 if __name__ == "__main__":
-    """fix_seed = 42
-    random.seed(fix_seed)
-    torch.manual_seed(fix_seed)
-    np.random.seed(fix_seed)"""
 
     parser = argparse.ArgumentParser(description="ClinStab robustness training and evaluation")
 
-    # basic config
     parser.add_argument(
         "--task_name",
         type=str,
@@ -30,8 +36,9 @@ if __name__ == "__main__":
         default="Autoformer",
         help="model name, options: [Autoformer, Crossformer, FEDformer, Informer, iTransformer, MTST, Nonstationary_Transformer, PatchTST, Reformer, Transformer, TCN, Medformer, ClinStab]",
     )
+    parser.add_argument("--teacher_model", type=str, default="Medformer")
+    parser.add_argument("--teacher_checkpoint", type=str, default="")
 
-    # data loader
     parser.add_argument(
         "--data", type=str, required=True, default="ETTm1", help="dataset type"
     )
@@ -57,9 +64,7 @@ if __name__ == "__main__":
         default="h",
         help="freq for time features encoding, options:[s:secondly, t:minutely, h:hourly, d:daily, b:business days, w:weekly, m:monthly], you can also use more detailed freq like 15min or 3h",
     )
-    # parser.add_argument('--checkpoints', type=str, default='./checkpoints/', help='location of model checkpoints')
 
-    # forecasting task
     parser.add_argument("--seq_len", type=int, default=96, help="input sequence length")
     parser.add_argument("--label_len", type=int, default=48, help="start token length")
     parser.add_argument(
@@ -72,10 +77,8 @@ if __name__ == "__main__":
         "--inverse", action="store_true", help="inverse output data", default=False
     )
 
-    # inputation task
     parser.add_argument("--mask_rate", type=float, default=0.25, help="mask ratio")
 
-    # anomaly detection task
     parser.add_argument(
         "--anomaly_ratio", type=float, default=0.25, help="prior anomaly ratio (percent)"
     )
@@ -84,13 +87,17 @@ if __name__ == "__main__":
     parser.add_argument('--eps', type=float, default=0.20, help='PGD攻击幅度')
     parser.add_argument('--alpha', type=float, default=0.01, help='PGD攻击步长')
     parser.add_argument('--steps', type=int, default=10, help='PGD攻击次数')
-    parser.add_argument('--w_adv', type=float, default=1, help='PGD前后输出接近')
-    parser.add_argument('--w_cls', type=float, default=0.5, help='teacher的输出和原本的输出距离接近')
+    parser.add_argument('--w_adv', type=float, default=1, help='compatibility weight')
+    parser.add_argument('--w_cls', type=float, default=0.5, help='compatibility weight')
+    parser.add_argument('--lambda_rob', type=float, default=1.0)
+    parser.add_argument('--lambda_con', type=float, default=0.5)
+    parser.add_argument('--lambda_know', type=float, default=0.5)
+    parser.add_argument('--temperature', type=float, default=2.0)
     parser.add_argument('--w_sim', type=float, default=0.5, help='IB输出特征间的loss')
     parser.add_argument('--w_ib', type=float, default=1.0, help='IB的权重')
     parser.add_argument('--iters_per_epoch', type=int, default=10,
                     help='每个epoch内对同一扰动数据训练的迭代次数')
-    # model define for baselines
+
     parser.add_argument('--expand', type=int, default=2, help='expansion factor for Mamba')
     parser.add_argument('--d_conv', type=int, default=4, help='conv kernel size for Mamba')
     parser.add_argument("--top_k", type=int, default=5, help="for TimesBlock")
@@ -166,16 +173,14 @@ if __name__ == "__main__":
         "--scdm_alpha",
         type=float,
         default=4.67,
-        help="SCDM sparsity ratio; k=floor(channels/scdm_alpha)",
+        help="SCDM sparsity ratio; k=max(1, floor(channels/scdm_alpha))",
     )
 
-    # optimization
-    # parser.add_argument('--num_workers', type=int, default=10, help='data loader num workers')
     parser.add_argument(
         "--num_workers", type=int, default=0, help="data loader num workers"
     )
     parser.add_argument("--itr", type=int, default=1, help="experiments times")
-    parser.add_argument("--train_epochs", type=int, default=10, help="train epochs")
+    parser.add_argument("--train_epochs", type=int, default=100, help="train epochs")
     parser.add_argument(
         "--batch_size", type=int, default=32, help="batch size of train input data"
     )
@@ -185,6 +190,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--learning_rate", type=float, default=0.0001, help="optimizer learning rate"
     )
+    parser.add_argument("--weight_decay", type=float, default=1e-5)
     parser.add_argument("--des", type=str, default="test", help="exp description")
     parser.add_argument("--loss", type=str, default="MSE", help="loss function")
     parser.add_argument(
@@ -203,7 +209,6 @@ if __name__ == "__main__":
         default=False,
     )
 
-
     parser.add_argument('--use_csam', action='store_true', help='使用CSAM注意力机制')
     parser.add_argument('--use_csam_slice', action='store_true', help='在CSAM中使用切片注意力')
     parser.add_argument('--use_csam_uncertainty', action='store_true', help='在CSAM中使用不确定性')
@@ -217,17 +222,12 @@ if __name__ == "__main__":
     parser.add_argument('--pola_alpha', type=int, default=4,
                         help='PolarFormer的alpha参数')
 
-    # parser.add_argument('--des', type=str, default='test', help='exp description')
-    # parser.add_argument('--loss', type=str, default='MSE', help='loss function')
-    # parser.add_argument('--lradj', type=str, default='type1', help='adjust learning rate')
-    # parser.add_argument('--use_amp', action='store_true', help='use automatic mixed precision training', default=False)
     parser.add_argument('--rho', type=float, default=0.65,
-                    help='AutoPGD步长调整参数，控制步长增减比例')
+                    help='adaptive PGD step adjustment factor')
     parser.add_argument('--max_restarts', type=int, default=1,
-                    help='AutoPGD最大重启次数，当攻击停滞时重新初始化')
+                    help='adaptive PGD restart count')
 
-    # GPU
-    parser.add_argument("--use_gpu", type=bool, default=True, help="use gpu")
+    parser.add_argument("--use_gpu", type=parse_bool, default=True, help="use gpu")
     parser.add_argument("--gpu", type=int, default=0, help="gpu")
     parser.add_argument(
         "--use_multi_gpu", action="store_true", help="use multiple gpus", default=False
@@ -235,9 +235,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--devices", type=str, default="0,1,2,3", help="device ids of multiple gpus"
     )
-    # parser.add_argument('--devices', type=str, default='0,1', help='device ids of multiple gpus')
 
-    # de-stationary projector params
     parser.add_argument(
         "--p_hidden_dims",
         type=int,
@@ -252,10 +250,9 @@ if __name__ == "__main__":
         help="number of hidden layers in projector",
     )
 
-
     args = parser.parse_args()
+    from utils.tools import experiment_setting
 
-    # Delay optional scientific imports until after argparse handles --help.
     import torch
     import random
     import numpy as np
@@ -299,62 +296,46 @@ if __name__ == "__main__":
             torch.manual_seed(seed)
             torch.cuda.manual_seed(seed)
             torch.cuda.manual_seed_all(seed)
-            # comment out the following lines if you are using dilated convolutions, e.g., TCN
-            # otherwise it will slow down the training extremely
+
             if args.model != "TCN":
                 torch.backends.cudnn.benchmark = False
                 torch.backends.cudnn.deterministic = True
 
-
-            # setting record of experiments
             args.seed = seed
-            setting = "{}/{}/{}/{}_{}_{}_{}_ft{}_sl{}_ll{}_pl{}_dm{}_nh{}_el{}_dl{}_df{}_fc{}_eb{}_dt{}_{}_seed{}".format(
-                args.task_name,
-                args.model_id,
-                args.model,
-                args.task_name,
-                args.model_id,
-                args.model,
-                args.data,
-                args.features,
-                args.seq_len,
-                args.label_len,
-                args.pred_len,
-                args.d_model,
-                args.n_heads,
-                args.e_layers,
-                args.d_layers,
-                args.d_ff,
-                args.factor,
-                args.embed,
-                args.distil,
-                args.des,
-                args.seed,
-            )
+            base_args = copy.copy(args)
+            setting = experiment_setting(base_args)
             pretrained_model_path = os.path.join('./checkpoints/', setting, 'checkpoint.pth')
             if os.path.exists(pretrained_model_path):
                 print(f"Using pretrained model from: {pretrained_model_path}")
-                exp = Exp(args)  # 设置原始实验
+                exp = Exp(args)
                 exp.test(setting, test=1)
             else:
                 print(f'pretrained_model_path not found: {pretrained_model_path}')
-                exp = Exp(args)  # 设置原始实验
+                exp = Exp(args)
                 print(">>>>>>>start training : {}>>>>>>>>>>>>>>>>>>>>>>>>>>".format(setting))
                 exp.train(setting)
 
                 print(">>>>>>>testing : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<".format(setting))
                 exp.test(setting)
 
-            # 添加鲁棒性训练部分
-            if Exp_Rob:  # 如果存在对应的鲁棒训练类
+            teacher_args = copy.copy(base_args)
+            teacher_args.model = args.teacher_model
+            teacher_setting = experiment_setting(teacher_args)
+            teacher_checkpoint = args.teacher_checkpoint or os.path.join(
+                './checkpoints/', teacher_setting, 'checkpoint.pth'
+            )
+            if not os.path.exists(teacher_checkpoint):
+                teacher_exp = Exp(teacher_args)
+                teacher_exp.train(teacher_setting)
+
+            if Exp_Rob:
                 print(">>>>>>>start robust training : {}>>>>>>>>>>>>>>>>>>>>>>>>>>".format(setting))
 
                 if os.path.exists(pretrained_model_path):
                     print(f"Using pretrained model from: {pretrained_model_path}")
                     experiment_rob = Exp_Rob(args)
-                    experiment_rob.train(setting, pretrained_model_path)
+                    experiment_rob.train(setting, pretrained_model_path, teacher_checkpoint)
 
-                    # 测试鲁棒性模型
                     robust_model_path = os.path.join('./checkpoints/', setting, 'rob_checkpoint.pth')
                     print(">>>>>>>testing robust model : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<".format(setting))
                     if os.path.exists(robust_model_path):
@@ -374,35 +355,15 @@ if __name__ == "__main__":
             torch.manual_seed(seed)
             torch.cuda.manual_seed(seed)
             torch.cuda.manual_seed_all(seed)
-            # comment out the following lines if you are using dilated convolutions, e.g., TCN
-            # otherwise it will slow down the training extremely
+
             if args.model != "TCN":
                 torch.backends.cudnn.benchmark = False
                 torch.backends.cudnn.deterministic = True
 
             args.seed = seed
-            setting = "{}_{}_{}_{}_ft{}_sl{}_ll{}_pl{}_dm{}_nh{}_el{}_dl{}_df{}_fc{}_eb{}_dt{}_{}_seed{}".format(
-                args.task_name,
-                args.model_id,
-                args.model,
-                args.data,
-                args.features,
-                args.seq_len,
-                args.label_len,
-                args.pred_len,
-                args.d_model,
-                args.n_heads,
-                args.e_layers,
-                args.d_layers,
-                args.d_ff,
-                args.factor,
-                args.embed,
-                args.distil,
-                args.des,
-                args.seed,
-            )
+            setting = experiment_setting(args)
 
-            exp = Exp(args)  # set experiments
+            exp = Exp(args)
             print(
                 ">>>>>>>testing : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<".format(setting)
             )

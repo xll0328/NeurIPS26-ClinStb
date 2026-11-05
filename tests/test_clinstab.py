@@ -1,11 +1,12 @@
 import unittest
 from types import SimpleNamespace
 
+import numpy as np
 import torch
 
+from data_provider.uea import normalize_batch_ts
 from models.ClinStab import Model
 from utils.clinstab_objective import projected_gradient_attack, stability_objective
-
 
 def config(channels=5, classes=3):
     return SimpleNamespace(
@@ -20,7 +21,6 @@ def config(channels=5, classes=3):
         scdm_alpha=2.0,
         e_layers=2,
     )
-
 
 class ClinStabTest(unittest.TestCase):
     def test_forward_gradient_and_routing(self):
@@ -62,6 +62,14 @@ class ClinStabTest(unittest.TestCase):
             set(terms), {"clean_ce", "robust_ce", "consistency", "knowledge", "total"}
         )
 
+    def test_normalization_reuses_training_statistics(self):
+        train = np.arange(24, dtype=np.float32).reshape(2, 4, 3)
+        evaluation = train + 10.0
+        normalized_train, mean, std = normalize_batch_ts(train, return_stats=True)
+        normalized_evaluation = normalize_batch_ts(evaluation, mean=mean, std=std)
+        self.assertTrue(np.allclose(normalized_train.mean(axis=(0, 1)), 0.0, atol=1e-6))
+        self.assertTrue(np.allclose(normalized_train.std(axis=(0, 1)), 1.0, atol=1e-6))
+        self.assertFalse(np.allclose(normalized_evaluation.mean(axis=(0, 1)), 0.0))
 
 if __name__ == "__main__":
     unittest.main()

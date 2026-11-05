@@ -6,7 +6,6 @@ from itertools import repeat
 from scipy.signal import butter, lfilter, filtfilt
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 
-
 def collate_fn(data, max_len=None):
     """Build mini-batch tensors from a list of (X, mask) tuples. Mask input. Create
     Args:
@@ -27,28 +26,26 @@ def collate_fn(data, max_len=None):
     batch_size = len(data)
     features, labels = zip(*data)
 
-    # Stack and pad features and masks (convert 2D to 3D tensors, i.e. add batch dimension)
     lengths = [
         X.shape[0] for X in features
-    ]  # original sequence length for each time series
+    ]
     if max_len is None:
         max_len = max(lengths)
 
     X = torch.zeros(
         batch_size, max_len, features[0].shape[-1]
-    )  # (batch_size, padded_length, feat_dim)
+    )
     for i in range(batch_size):
         end = min(lengths[i], max_len)
         X[i, :end, :] = features[i][:end, :]
 
-    targets = torch.stack(labels, dim=0)  # (batch_size, num_labels)
+    targets = torch.stack(labels, dim=0)
 
     padding_masks = padding_mask(
         torch.tensor(lengths, dtype=torch.int16), max_len=max_len
-    )  # (batch_size, padded_length) boolean tensor, "1" means keep
+    )
 
     return X, targets, padding_masks
-
 
 def padding_mask(lengths, max_len=None):
     """
@@ -58,14 +55,13 @@ def padding_mask(lengths, max_len=None):
     batch_size = lengths.numel()
     max_len = (
         max_len or lengths.max_val()
-    )  # trick works because of overloading of 'or' operator for non-boolean types
+    )
     return (
         torch.arange(0, max_len, device=lengths.device)
-        .type_as(lengths)  # convert to same type as lengths tensor
-        .repeat(batch_size, 1)  # (batch_size, max_len)
+        .type_as(lengths)
+        .repeat(batch_size, 1)
         .lt(lengths.unsqueeze(1))
     )
-
 
 class Normalizer(object):
     """
@@ -129,7 +125,6 @@ class Normalizer(object):
         else:
             raise (NameError(f'Normalize method "{self.norm_type}" not implemented'))
 
-
 def interpolate_missing(y):
     """
     Replaces NaN values in pd.Series `y` using linear interpolation
@@ -137,7 +132,6 @@ def interpolate_missing(y):
     if y.isna().any():
         y = y.interpolate(method="linear", limit_direction="both")
     return y
-
 
 def subsample(y, limit=256, factor=2):
     """
@@ -147,43 +141,63 @@ def subsample(y, limit=256, factor=2):
         return y[::factor].reset_index(drop=True)
     return y
 
-
 def bandpass_filter_func(signal, fs, lowcut, highcut):
-    # length of signal
+
     fft_len = signal.shape[1]
-    # FFT
+
     fft_spectrum = np.fft.rfft(signal, n=fft_len, axis=1)
-    # get frequency bins
+
     freqs = np.fft.rfftfreq(fft_len, d=1/fs)
-    # create mask for freqs
+
     mask = (freqs >= lowcut) & (freqs <= highcut)
-    # expand mask to match fft_spectrum dimensions
-    mask = mask[:, np.newaxis]  # Adjust mask shape if necessary
-    # apply mask
+
+    mask = mask[:, np.newaxis]
+
     fft_spectrum = fft_spectrum * mask
-    # IFFT
+
     filtered_signal = np.fft.irfft(fft_spectrum, n=fft_len, axis=1)
 
     return filtered_signal
 
-
-def normalize_batch_ts(batch):
+def normalize_batch_ts(batch, mean=None, std=None, return_stats=False):
     """Normalize a batch of time-series data.
 
     Args:
         batch (numpy.ndarray): A batch of input time-series in shape (N, T, C).
 
     Returns:
-        numpy.ndarray: A batch of processed time-series, normalized for each channel of each sample.
+        numpy.ndarray: A batch of processed time-series normalized with channel statistics.
     """
-    # Calculate mean and std for each sample's each channel
-    mean_values = batch.mean(axis=1, keepdims=True)  # Shape: (N, 1, C)
-    std_values = batch.std(axis=1, keepdims=True)  # Shape: (N, 1, C)
+    batch = np.asarray(batch)
+    if mean is None:
+        mean_values = batch.mean(axis=(0, 1), keepdims=True)
+    else:
+        mean_values = np.asarray(mean).reshape(1, 1, -1)
+    if std is None:
+        std_values = batch.std(axis=(0, 1), keepdims=True)
+    else:
+        std_values = np.asarray(std).reshape(1, 1, -1)
 
-    # Avoid division by zero by setting small std to 1
     std_values[std_values == 0] = 1.0
 
-    # Perform standard normalization
     normalized_batch = (batch - mean_values) / std_values
 
+    if return_stats:
+        return normalized_batch, mean_values, std_values
     return normalized_batch
+
+_NORMALIZATION_STATS = {}
+
+def normalization_stats_ready(key):
+    return key in _NORMALIZATION_STATS
+
+def normalize_with_training_stats(batch, training_batch=None, key=None):
+    if key is None or key not in _NORMALIZATION_STATS:
+        if training_batch is None:
+            raise ValueError("training_batch is required when statistics are not cached")
+        _, mean_values, std_values = normalize_batch_ts(training_batch, return_stats=True)
+        if key is not None:
+            _NORMALIZATION_STATS[key] = (mean_values, std_values)
+    else:
+        mean_values, std_values = _NORMALIZATION_STATS[key]
+    return normalize_batch_ts(batch, mean=mean_values, std=std_values)
