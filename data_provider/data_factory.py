@@ -30,7 +30,7 @@ def data_provider(args, flag):
     Data = data_dict[args.data]
     timeenc = 0 if args.embed != "timeF" else 1
 
-    if flag == "test":
+    if str(flag).upper() == "TEST":
         shuffle_flag = False
         drop_last = True
         if args.task_name == "anomaly_detection" or args.task_name == "classification":
